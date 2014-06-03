@@ -103,6 +103,13 @@ pairE xs ys =
                      in (xs.fromNat n1, ys.fromNat n2)
              in { size = newS , fromNat = fromNat }
 
+apE : Enum (a -> b) -> Enum a -> Enum b
+apE fs xs = mapE (uncurry (<|)) (pairE fs xs)
+
+fixE : (Enum a -> Enum a) -> Enum a
+fixE f = let e () = f (fixE f)
+         in { size = inf, fromNat n = (e ()).fromNat n }
+
 -- | Base enumerators
 natE : Enum Int
 natE = { size = inf, fromNat = id }
@@ -112,3 +119,11 @@ boolE = finE [True, False]
 
 ordE : Enum Order
 ordE = finE [LT, EQ, GT]
+
+manyE : Enum a -> Enum [a]
+manyE e = if e.size == nat 0
+          then finE [[]]
+          else fixE (\lE ->
+                         orE (finE [[]])
+                             ((::) `mapE` e `apE` manyE e) 
+                    )
