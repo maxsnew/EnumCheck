@@ -73,6 +73,10 @@ orE xs ys =
                           else orE lessE belowBigE
              in appendE belowE aboveE
 
+-- | TODO: make this fair
+anyE : [Enum a] -> Enum a
+anyE = foldr orE emptyE
+
 eitherE : Enum a -> Enum b -> Enum (Either a b)
 eitherE l r = orE (mapE Left l) (mapE Right r)
 
@@ -106,6 +110,10 @@ pairE xs ys =
 apE : Enum (a -> b) -> Enum a -> Enum b
 apE fs xs = mapE (uncurry (<|)) (pairE fs xs)
 
+-- | The nth elt of the output lists will come from the nth input enumeration
+listE : [Enum a] -> Enum [a]
+listE = foldr (\hd acc -> (::) `mapE` hd `apE` acc) (finE [[]])
+
 fixE : (Enum a -> Enum a) -> Enum a
 fixE f = let e () = f (fixE f)
          in { size = inf, fromNat n = (e ()).fromNat n }
@@ -113,6 +121,9 @@ fixE f = let e () = f (fixE f)
 -- | Base enumerators
 natE : Enum Int
 natE = { size = inf, fromNat = id }
+
+emptyE : Enum a
+emptyE = { size = nat 0, fromNat x = head [] }
 
 boolE : Enum Bool
 boolE = finE [True, False]
@@ -127,3 +138,20 @@ manyE e = if e.size == nat 0
                          orE (finE [[]])
                              ((::) `mapE` e `apE` manyE e) 
                     )
+
+remove : Int -> [a] -> [a]
+remove n xs = take n xs ++ drop (n+1) xs
+
+-- TODO: use arrays in interpretation part once remove is fixed
+permsE : [a] -> Enum [a]
+permsE xs = let len = length xs
+                choices = listE . map (\x -> takeE (len - x) natE) <| [0..len - 1]
+                permute is = interpret xs is []
+            in permute `mapE` choices
+
+interpret : [a] -> [Int] -> [a] -> [a]
+interpret curXs curIs acc = case curIs of
+  []      -> acc -- Possibly should be reverse acc, idk
+  (i::is) -> let x      = head <| drop i curXs
+                 newXs = remove i curXs
+             in interpret newXs is (x :: acc)
