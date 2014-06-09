@@ -1,6 +1,7 @@
 module EnumCheck.Test where
 
 import Either (..)
+import Trampoline as T
 
 import EnumCheck.Enum (..)
 import EnumCheck.ExtNat (..)
@@ -17,14 +18,18 @@ expectEq a b = if a == b
                then Nothing
                else Just ("Expected " ++ show a ++ " but got " ++ show b)
 
-runTest : Test a -> Int -> Either Error Pass
-runTest t suggNum =
+runTest : Int -> Test a -> Either Error Pass
+runTest suggNum t =
     let numTests = case t.src.size of
                      Inf -> suggNum
                      Nat n -> min n (toInt t.src.size)
-        loop cur = if cur >= numTests
-                   then Right (show numTests ++ " tests passed.")
-                   else case t.run (fromNat cur t.src) of
-                          Nothing  -> loop (cur + 1)
-                          Just err -> Left (show cur ++ " tests passed. " ++ "Test " ++ show (cur + 1) ++ " failed: " ++ err)
-    in loop 0
+        loop cur fuel =
+            if | fuel > 1000      -> T.Continue (\_ -> loop cur 0)
+               | cur >= numTests -> T.Done . Right <| show numTests ++ " tests passed."
+               | otherwise       ->
+                   case t.run (fromNat cur t.src) of
+                     Nothing  -> loop (cur + 1) (fuel + 1)
+                     Just err ->
+                         let msg = show cur ++ " tests passed. " ++ "Test " ++ show (cur + 1) ++ " failed: " ++ err
+                         in T.Done . Left <| msg
+    in T.trampoline <| loop 0 0
