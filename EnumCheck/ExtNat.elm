@@ -37,6 +37,11 @@ m *! n = case (m, n) of
            (_, Inf) -> m
            (Nat m, Nat n) -> Nat (m * n)
 
+(/!) : ExtNat -> Int -> ExtNat
+m /! n = case m of
+           Inf    -> Inf
+           Nat m' -> Nat (m' `div` n)
+
 comp : ExtNat -> ExtNat -> Order
 comp m n = case (m, n) of
              (Inf, Inf) -> EQ

@@ -38,6 +38,11 @@ takeE n es = { size = nat n
              , fromNat = es.fromNat
              }
 
+everyE : Nat -> Enum a -> Enum a
+everyE n e = { size = e.size /! n
+             , fromNat = e.fromNat . (\m -> m * n)
+             } 
+
 dropE : Nat -> Enum a -> Enum a
 dropE n es = { size = es.size -! nat n
              , fromNat = es.fromNat . (\x -> x + n)
