@@ -8,12 +8,15 @@ data ExtNat = Inf | Nat BigInt
 
 inf = Inf
 
--- nat n = if n >= 0
---         then Nat n
---         else Native.Error.raise "Not a nat"
+nat n = if n >= 0
+        then (Nat << BI.fromInt) n
+        else Native.Error.raise "Not a nat"
 
-toInt : ExtNat -> BigInt
-toInt (Nat n) = n
+toBigInt : ExtNat -> BigInt
+toBigInt (Nat n) = n
+
+toInt : ExtNat -> Int
+toInt = BI.toInt << toBigInt
 
 isInf n = case n of
             Inf -> True
@@ -44,7 +47,7 @@ m *! n = case (m, n) of
 (/!) : ExtNat -> Int -> ExtNat
 m /! n = case m of
            Inf    -> Inf
-           Nat m' -> (Nat . fst) (m' `BI.quotRem` (BI.fromInt n))
+           Nat m' -> (Nat << fst) (m' `BI.quotRem` (BI.fromInt n))
 
 comp : ExtNat -> ExtNat -> Order
 comp m n = case (m, n) of
