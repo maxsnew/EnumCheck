@@ -8,8 +8,10 @@ data ExtNat = Inf | Nat BigInt
 
 inf = Inf
 
-nat n = if n >= 0
-        then (Nat << BI.fromInt) n
+-- | Fails if the integer is negative
+nat : BigInt -> ExtNat
+nat n = if BI.gte n BI.Zero
+        then Nat n
         else Native.Error.raise "Not a nat"
 
 toBigInt : ExtNat -> BigInt
