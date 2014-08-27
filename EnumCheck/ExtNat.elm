@@ -14,14 +14,23 @@ nat n = if BI.gte n BI.Zero
         then Nat n
         else Native.Error.raise "Not a nat"
 
+zero : ExtNat
+zero = Nat BI.zero
+
+fromInt : Int -> ExtNat
+fromInt = nat << BI.fromInt
+
 toBigInt : ExtNat -> BigInt
-toBigInt (Nat n) = n
+toBigInt m = case m of
+  Inf -> Native.Error.raise "Error, toBigInt: argument is Infinite"
+  Nat b -> b
 
 toInt : ExtNat -> Int
 toInt = BI.toInt << toBigInt
 
+isInf : ExtNat -> Bool
 isInf n = case n of
-            Inf -> True
+            Inf    -> True
             Nat _ -> False
 
 (+!) : ExtNat -> ExtNat -> ExtNat

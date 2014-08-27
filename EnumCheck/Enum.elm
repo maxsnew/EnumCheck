@@ -15,10 +15,10 @@ type Enum a = { size    : ExtNat
               }
 
 toList : Enum a -> [a]
-toList e = map e.fromNat [0 .. EN.toBigInt e.size - 1]
+toList e = map e.fromNat <| BI.range BI.zero (BI.dec (EN.toBigInt e.size))
 
 fromNat : Nat -> Enum a -> a
-fromNat n e = if | n < 0            -> Native.Error.raise "fromNat only takes nats"
+fromNat n e = if | BI.lt n BI.zero     -> Native.Error.raise "fromNat only takes nats"
                  | EN.nat n >=! e.size -> Native.Error.raise "fromNat given index greater than size of enum"
                  | otherwise  -> e.fromNat n
 
@@ -26,30 +26,34 @@ fromNat n e = if | n < 0            -> Native.Error.raise "fromNat only takes na
 finE : [a] -> Enum a
 finE xs = let arr = Array.fromList xs
               len = Array.length arr
-          in { size = EN.nat len
-             , fromNat = flip Array.getOrFail arr
+          in { size = EN.fromInt len
+             , fromNat n = Array.getOrFail (BI.toInt n) arr
              }
 
 mapE : (a -> b) -> Enum a -> Enum b
 mapE f e = { e | fromNat <- f << e.fromNat }
 
-splitE : Nat -> Enum a -> (Enum a, Enum a)
+splitE : Int -> Enum a -> (Enum a, Enum a)
 splitE n e = (takeE n e, dropE n e)
 
-takeE : Nat -> Enum a -> Enum a
-takeE n es = { size = EN.nat n
+takeE : Int -> Enum a -> Enum a
+takeE n es = { size = EN.fromInt n
              , fromNat = es.fromNat
              }
 
-everyE : Nat -> Enum a -> Enum a
-everyE n e = { size = e.size /! n
-             , fromNat = e.fromNat << (\m -> m * n)
-             } 
+everyE : Int -> Enum a -> Enum a
+everyE n e =
+  let natN = BI.fromInt n
+  in { size = e.size /! n
+     , fromNat = e.fromNat << (\m -> BI.multiply m natN)
+     } 
 
-dropE : Nat -> Enum a -> Enum a
-dropE n es = { size = es.size -! EN.nat n
-             , fromNat = es.fromNat << (\x -> x + n)
-             }
+dropE : Int -> Enum a -> Enum a
+dropE n es =
+  let natN = BI.fromInt n
+  in { size = es.size -! EN.nat natN
+     , fromNat = es.fromNat << (\x -> BI.add x natN)
+     }
 
 appendE : Enum a -> Enum a -> Enum a
 appendE xs ys = { size = xs.size +! ys.size 
@@ -66,8 +70,8 @@ orE xs ys =
     in 
       if | xs.size == ys.size -> 
              { size = newSize
-             , fromNat n = let (q,r) = quotRem n 2
-                               e = if r == 0 then xs else ys
+             , fromNat n = let (q,r) = BI.quotRem n (BI.fromInt 2)
+                               e = if r == BI.zero then xs else ys
                            in e.fromNat q
              }
          | otherwise ->
@@ -96,19 +100,17 @@ pairE xs ys =
     let newS = xs.size *! ys.size 
     in 
       if | xs.size == ys.size ->
-             let fromNat n = let flroot = floor << sqrt << toFloat <| n
-                                 flrootsq = flroot * flroot
-                                 diff = n - flrootsq
-                                 (n1, n2) = if n - flrootsq < flroot
+             let fromNat n = let (flroot, diff) = BI.flroot n
+                                 (n1, n2) = if BI.lt diff flroot
                                             then (diff, flroot)
-                                            else (flroot, diff - flroot)
+                                            else (flroot, diff `BI.subtract` flroot)
                              in (xs.fromNat n1, ys.fromNat n2)
              in { size = newS, fromNat = fromNat }
          | otherwise          ->
              let firstLess = xs.size <=! ys.size
-                 lessSize = EN.toInt <| if firstLess then xs.size else ys.size
+                 lessSize = EN.toBigInt <| if firstLess then xs.size else ys.size
                  fromNat n =
-                     let (q, r) = quotRem n lessSize
+                     let (q, r) = BI.quotRem n lessSize
                          (n1, n2) = if firstLess 
                                     then (r, q)
                                     else (q, r)
@@ -130,8 +132,11 @@ fixE f = let e () = f (fixE f)
 natE : Enum BigInt
 natE = { size = EN.inf, fromNat = identity }
 
+smallNatE : Enum Int
+smallNatE = BI.toInt `mapE` natE
+
 emptyE : Enum a
-emptyE = { size = EN.nat 0, fromNat x = head [] }
+emptyE = { size = EN.zero, fromNat x = head [] }
 
 boolE : Enum Bool
 boolE = finE [True, False]
@@ -140,7 +145,7 @@ ordE : Enum Order
 ordE = finE [LT, EQ, GT]
 
 manyE : Enum a -> Enum [a]
-manyE e = if e.size == EN.nat 0
+manyE e = if e.size == EN.zero
           then finE [[]]
           else fixE (\lE ->
                          orE (finE [[]])
@@ -153,7 +158,7 @@ remove n xs = take n xs ++ drop (n+1) xs
 -- TODO: use arrays in interpretation part once remove is fixed
 permsE : [a] -> Enum [a]
 permsE xs = let len = length xs
-                choices = listE << map (\x -> takeE (len - x) natE) <| [0..len - 1]
+                choices = listE << map (\x -> takeE (len - x) smallNatE) <| [0..len - 1]
                 permute is = interpret xs is []
             in permute `mapE` choices
 
