@@ -1,5 +1,6 @@
 module EnumCheck.Test where
 
+import BigInt as BI
 import Either (..)
 import Trampoline as T
 
@@ -20,16 +21,18 @@ expectEq a b = if a == b
 
 runTest : Int -> Test a -> Either Error Pass
 runTest suggNum t =
-    let numTests = case t.src.size of
-                     Inf -> suggNum
-                     Nat n -> min n (toInt t.src.size)
+    let bigSugg = BI.fromInt suggNum
+        numTests = case t.src.size of
+                     Inf -> bigSugg
+                     Nat n -> BI.min n bigSugg
+        loop : BI.BigInt -> Int -> T.Trampoline (Either Error Pass)
         loop cur fuel =
             if | fuel > 1000      -> T.Continue (\_ -> loop cur 0)
-               | cur >= numTests -> T.Done . Right <| show numTests ++ " tests passed."
+               | BI.gte cur numTests -> T.Done << Right <| (BI.toString numTests) ++ " tests passed."
                | otherwise       ->
                    case t.run (fromNat cur t.src) of
-                     Nothing  -> loop (cur + 1) (fuel + 1)
+                     Nothing  -> loop (BI.inc cur) (fuel + 1)
                      Just err ->
-                         let msg = show cur ++ " tests passed. " ++ "Test " ++ show (cur + 1) ++ " failed: " ++ err
-                         in T.Done . Left <| msg
-    in T.trampoline <| loop 0 0
+                         let msg = BI.toString cur ++ " tests passed. " ++ "Test " ++ BI.toString (BI.inc cur) ++ " failed: " ++ err
+                         in T.Done << Left <| msg
+    in T.trampoline <| loop BI.zero 0
