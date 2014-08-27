@@ -100,7 +100,8 @@ pairE xs ys =
     let newS = xs.size *! ys.size 
     in 
       if | xs.size == ys.size ->
-             let fromNat n = let (flroot, diff) = BI.flroot n
+             let fromNat n = let flroot   = BI.flroot n
+                                 diff     = n `BI.subtract` (flroot `BI.multiply` flroot)
                                  (n1, n2) = if BI.lt diff flroot
                                             then (diff, flroot)
                                             else (flroot, diff `BI.subtract` flroot)
