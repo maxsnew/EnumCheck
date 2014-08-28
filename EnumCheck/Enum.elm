@@ -3,8 +3,12 @@ module EnumCheck.Enum where
 import Array
 import BigInt (BigInt)
 import BigInt as BI
+import BigInt.Convenient as I
 import Either (Either(Left, Right))
+import List
 import Native.Error
+import String
+import Trampoline (Trampoline(Continue, Done), trampoline)
 
 import EnumCheck.ExtNat (ExtNat, (+!), (-!), (*!), (/!), (<!), (<=!), (>=!))
 import EnumCheck.ExtNat as EN
@@ -13,54 +17,70 @@ type Nat = BigInt
 type Enum a = { size    : ExtNat
               , fromNat : Nat -> a
               }
+startFuel = 100
 
 toList : Enum a -> [a]
 toList e = map e.fromNat <| BI.range BI.zero (BI.dec (EN.toBigInt e.size))
 
 fromNat : Nat -> Enum a -> a
-fromNat n e = if | BI.lt n BI.zero     -> Native.Error.raise "fromNat only takes nats"
-                 | EN.nat n >=! e.size -> Native.Error.raise "fromNat given index greater than size of enum"
-                 | otherwise  -> e.fromNat n
+fromNat n e =
+  if | BI.lt n BI.zero     -> Native.Error.raise "fromNat only takes nats"
+     | EN.nat n >=! e.size -> Native.Error.raise <| "fromNat given index greater than size of enum\n\tSize = " ++ (BI.toString << EN.toBigInt) e.size ++ " and index = "  ++ BI.toString n
+     | otherwise  -> e.fromNat n
 
 -- | Combinators
 finE : [a] -> Enum a
 finE xs = let arr = Array.fromList xs
-              len = Array.length arr
-          in { size = EN.fromInt len
+              len = Array.foldl (\_ i -> BI.inc i) BI.zero arr
+          in { size = EN.nat len
              , fromNat n = Array.getOrFail (BI.toInt n) arr
              }
 
 mapE : (a -> b) -> Enum a -> Enum b
 mapE f e = { e | fromNat <- f << e.fromNat }
 
-splitE : Int -> Enum a -> (Enum a, Enum a)
+splitE : Nat -> Enum a -> (Enum a, Enum a)
 splitE n e = (takeE n e, dropE n e)
 
-takeE : Int -> Enum a -> Enum a
-takeE n es = { size = EN.fromInt n
+takeE : Nat -> Enum a -> Enum a
+takeE n es = { size    = EN.min (EN.nat n) es.size
              , fromNat = es.fromNat
              }
 
-everyE : Int -> Enum a -> Enum a
+reverseE : Enum a -> Enum a
+reverseE e =
+  let size = EN.toBigInt e.size
+      less = BI.dec size
+  in { size      = e.size
+     , fromNat = e.fromNat << BI.subtract less
+     }
+
+everyE : Nat -> Enum a -> Enum a
 everyE n e =
-  let natN = BI.fromInt n
-  in { size = e.size /! n
-     , fromNat = e.fromNat << (\m -> BI.multiply m natN)
+  let size' = e.size /! n
+      offset = BI.dec n
+      f m = e.fromNat (BI.add offset (BI.multiply m n))
+  in { size = size'
+     , fromNat = f
      } 
 
-dropE : Int -> Enum a -> Enum a
+dropE : Nat -> Enum a -> Enum a
 dropE n es =
-  let natN = BI.fromInt n
-  in { size = es.size -! EN.nat natN
-     , fromNat = es.fromNat << (\x -> BI.add x natN)
+  let extN = EN.nat n
+      f m = es.fromNat (BI.add m n)
+  in { size = if | es.size >=! extN -> es.size -! extN
+                 | otherwise        -> (EN.nat BI.zero)
+     , fromNat = f
      }
 
 appendE : Enum a -> Enum a -> Enum a
-appendE xs ys = { size = xs.size +! ys.size 
-                , fromNat n = if EN.nat n <! xs.size
-                              then xs.fromNat n
-                              else ys.fromNat (BI.subtract n (EN.toBigInt xs.size))
-                }
+appendE xs ys =
+    let f n = if EN.nat n <! xs.size
+              then xs.fromNat n
+              else ys.fromNat (BI.subtract n (EN.toBigInt xs.size))
+    in { size = xs.size +! ys.size
+       , fromNat = f
+       }
 
 quotRem x y = (x // y, x % y)
 
@@ -70,16 +90,15 @@ orE xs ys =
     in 
       if | xs.size == ys.size -> 
              { size = newSize
-             , fromNat n = let (q,r) = BI.quotRem n (BI.fromInt 2)
+             , fromNat n = let (q,r) = BI.quotRem n I.two
                                e = if r == BI.zero then xs else ys
                            in e.fromNat q
              }
          | otherwise ->
              let (lessE, bigE, flipped) = 
-                     
                      if | xs.size <=! ys.size -> (xs, ys, False)
                         | otherwise -> (ys, xs, True)
-                 (belowBigE, aboveE) = splitE (EN.toInt lessE.size) bigE
+                 (belowBigE, aboveE) = splitE (EN.toBigInt lessE.size) bigE
                  belowE = if flipped
                           then orE belowBigE lessE
                           else orE lessE belowBigE
@@ -100,23 +119,23 @@ pairE xs ys =
     let newS = xs.size *! ys.size 
     in 
       if | xs.size == ys.size ->
-             let fromNat n = let flroot   = BI.flroot n
-                                 diff     = n `BI.subtract` (flroot `BI.multiply` flroot)
-                                 (n1, n2) = if BI.lt diff flroot
-                                            then (diff, flroot)
-                                            else (flroot, diff `BI.subtract` flroot)
-                             in (xs.fromNat n1, ys.fromNat n2)
-             in { size = newS, fromNat = fromNat }
+             let fromNat' n = let flroot   = BI.flroot n
+                                  diff     = n `BI.subtract` (flroot `BI.multiply` flroot)
+                                  (n1, n2) = if BI.lt diff flroot
+                                             then (diff, flroot)
+                                             else (flroot, diff `BI.subtract` flroot)
+                              in (xs.fromNat n1, ys.fromNat n2)
+             in { size = newS, fromNat = fromNat' }
          | otherwise          ->
              let firstLess = xs.size <=! ys.size
                  lessSize = EN.toBigInt <| if firstLess then xs.size else ys.size
-                 fromNat n =
-                     let (q, r) = BI.quotRem n lessSize
-                         (n1, n2) = if firstLess 
-                                    then (r, q)
-                                    else (q, r)
-                     in (xs.fromNat n1, ys.fromNat n2)
-             in { size = newS , fromNat = fromNat }
+                 fromNat' n =
+                   let (q, r) = BI.quotRem n lessSize
+                       (n1, n2) = if firstLess
+                                  then (r, q)
+                                  else (q, r)
+                   in (xs.fromNat n1, ys.fromNat n2)
+             in { size = newS , fromNat = fromNat' }
 
 apE : Enum (a -> b) -> Enum a -> Enum b
 apE fs xs = mapE (uncurry (<|)) (pairE fs xs)
@@ -124,6 +143,13 @@ apE fs xs = mapE (uncurry (<|)) (pairE fs xs)
 -- | The nth elt of the output lists will come from the nth input enumeration
 listE : [Enum a] -> Enum [a]
 listE = foldr (\hd acc -> (::) `mapE` hd `apE` acc) (finE [[]])
+
+zipE : Enum a -> Enum b -> Enum (a, b)
+zipE e1 e2 =
+  let f n = (e1.fromNat n, e2.fromNat n)
+  in { size = EN.min e1.size e2.size
+     , fromNat = f
+     }
 
 fixE : (Enum a -> Enum a) -> Enum a
 fixE f = let e () = f (fixE f)
@@ -137,7 +163,7 @@ smallNatE : Enum Int
 smallNatE = BI.toInt `mapE` natE
 
 emptyE : Enum a
-emptyE = { size = EN.zero, fromNat x = head [] }
+emptyE = { size = EN.zero, fromNat x = Native.Error.raise "Enum.elm: there are no elements in emptyE!" }
 
 boolE : Enum Bool
 boolE = finE [True, False]
@@ -153,19 +179,21 @@ manyE e = if e.size == EN.zero
                              ((::) `mapE` e `apE` manyE e) 
                     )
 
-remove : Int -> [a] -> [a]
-remove n xs = take n xs ++ drop (n+1) xs
-
 -- TODO: use arrays in interpretation part once remove is fixed
 permsE : [a] -> Enum [a]
-permsE xs = let len = length xs
-                choices = listE << map (\x -> takeE (len - x) smallNatE) <| [0..len - 1]
-                permute is = interpret xs is []
-            in permute `mapE` choices
+permsE xs =
+  let len = BI.length xs
+      choices = listE << map (\x -> takeE (BI.subtract len x) natE) <| BI.range BI.zero (BI.dec len)
+      permute = interp xs
+  in permute `mapE` choices
 
-interpret : [a] -> [Int] -> [a] -> [a]
+interp xs is = interpret xs is []
+
+interpret : [a] -> [BigInt] -> [a] -> [a]
 interpret curXs curIs acc = case curIs of
   []      -> acc -- Possibly should be reverse acc, idk
-  (i::is) -> let x      = head <| drop i curXs
-                 newXs = remove i curXs
+  (i::is) -> let x = case (BI.drop i curXs) of
+                   []   -> Native.Error.raise ("Enum.elm: interpret bug")
+                   x::_ -> x
+                 newXs = BI.remove i curXs
              in interpret newXs is (x :: acc)

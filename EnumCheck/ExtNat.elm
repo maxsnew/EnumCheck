@@ -17,9 +17,6 @@ nat n = if BI.gte n BI.Zero
 zero : ExtNat
 zero = Nat BI.zero
 
-fromInt : Int -> ExtNat
-fromInt = nat << BI.fromInt
-
 toBigInt : ExtNat -> BigInt
 toBigInt m = case m of
   Inf -> Native.Error.raise "Error, toBigInt: argument is Infinite"
@@ -55,10 +52,10 @@ m *! n = case (m, n) of
            (_, Inf) -> m
            (Nat m, Nat n) -> Nat (BI.multiply m n)
 
-(/!) : ExtNat -> Int -> ExtNat
+(/!) : ExtNat -> BigInt -> ExtNat
 m /! n = case m of
            Inf    -> Inf
-           Nat m' -> (Nat << fst) (m' `BI.quotRem` (BI.fromInt n))
+           Nat m' -> (Nat << fst) (m' `BI.quotRem` n)
 
 comp : ExtNat -> ExtNat -> Order
 comp m n = case (m, n) of
@@ -72,3 +69,13 @@ m >=! n = comp m n /= LT
 
 m <! n = comp m n == LT
 m <=! n = comp m n /= GT
+
+min : ExtNat -> ExtNat -> ExtNat
+min m n = case comp m n of
+  GT -> n
+  _  -> m
+
+max : ExtNat -> ExtNat -> ExtNat
+max m n = case comp m n of
+  LT -> n
+  _  -> m
